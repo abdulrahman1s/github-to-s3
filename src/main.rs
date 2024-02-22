@@ -35,7 +35,7 @@ struct Repository {
 async fn get_repositories() -> anyhow::Result<Vec<Repository>> {
     let body = reqwest::Client::new()
         .get("https://api.github.com/user/repos?per_page=100&sort=pushed")
-        .header(AUTHORIZATION, format!("token {}", &*GITHUB_TOKEN))
+        .header(AUTHORIZATION, format!("token {}", &*GH_TOKEN))
         .header(USER_AGENT, "rust")
         .send()
         .await?
@@ -64,11 +64,9 @@ async fn main() -> anyhow::Result<()> {
         Bucket::new(&*S3_BUCKET_NAME, REGION.clone(), CREDENTIALS.clone())?.with_path_style();
 
     for repo in repos {
-        if repo.fork || repo.owner.login != *GITHUB_USERNAME {
+        if repo.fork || repo.owner.login != *GITHUB_ACTOR {
             continue;
         }
-
-        println!("Cloning {}", &repo.full_name);
 
         let s3_path = format!("{}.tar.gz", repo.full_name);
         let clone_path = format!("clones/{}", repo.full_name);
@@ -78,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
         git::Repository::clone(
             &format!(
                 "https://{}:{}@github.com/{}.git",
-                &*GITHUB_USERNAME, &*GITHUB_TOKEN, repo.full_name
+                &*GITHUB_ACTOR, &*GH_TOKEN, repo.full_name
             ),
             &clone_path,
         )

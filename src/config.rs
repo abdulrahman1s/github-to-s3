@@ -15,9 +15,9 @@ macro_rules! config {
 }
 
 config! {
-   GITHUB_TOKEN String,
+   GH_TOKEN String,
 
-   GITHUB_USERNAME String,
+   GITHUB_ACTOR String,
 
    S3_BUCKET_NAME String,
 
