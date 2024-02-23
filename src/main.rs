@@ -115,8 +115,13 @@ async fn main() -> anyhow::Result<()> {
             continue;
         }
 
-        let s3_path = format!("{}.tar.gz", repo.full_name);
         let clone_path = format!("clones/{}", repo.full_name);
+        let s3_path = format!(
+            "{}/{}/{}.tar.gz",
+            repo.owner.login,
+            if repo.private { "private" } else { "public" },
+            repo.name
+        );
 
         std::fs::remove_dir_all(&clone_path).ok();
 
