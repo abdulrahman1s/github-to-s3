@@ -1,10 +1,11 @@
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use git2 as git;
-use reqwest::header::{AUTHORIZATION, USER_AGENT};
+use reqwest::header::{ACCEPT, AUTHORIZATION, USER_AGENT};
 use s3::{creds::Credentials, Bucket, Region};
 use serde::{Deserialize, Serialize};
 use serde_json as JSON;
+use std::collections::HashMap;
 
 mod config;
 use config::*;
@@ -32,10 +33,54 @@ struct Repository {
     owner: RepositoryOwner,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct GistFile {
+    filename: String,
+    language: Option<String>,
+    raw_url: String,
+    size: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Gist {
+    id: String,
+    public: bool,
+    description: String,
+    created_at: String,
+    updated_at: String,
+    files: HashMap<String, GistFile>,
+}
+
+async fn file_content(file: &GistFile) -> anyhow::Result<String> {
+    let content = reqwest::Client::new()
+        .get(&file.raw_url)
+        .send()
+        .await?
+        .text()
+        .await?;
+
+    Ok(content)
+}
+
 async fn get_repositories() -> anyhow::Result<Vec<Repository>> {
     let body = reqwest::Client::new()
         .get("https://api.github.com/user/repos?per_page=100&sort=pushed")
         .header(AUTHORIZATION, format!("token {}", &*GH_TOKEN))
+        .header(ACCEPT, "application/vnd.github+json")
+        .header(USER_AGENT, "rust")
+        .send()
+        .await?
+        .text()
+        .await?;
+
+    Ok(JSON::from_str(&body).expect("Failed to parse JSON"))
+}
+
+async fn get_gists() -> anyhow::Result<Vec<Gist>> {
+    let body = reqwest::Client::new()
+        .get("https://api.github.com/gists?per_page=100")
+        .header(AUTHORIZATION, format!("token {}", &*GH_TOKEN))
+        .header(ACCEPT, "application/vnd.github+json")
         .header(USER_AGENT, "rust")
         .send()
         .await?
@@ -55,6 +100,8 @@ fn dir_to_tar(path: &str, src_path: &str) -> std::io::Result<Vec<u8>> {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv::dotenv().ok();
+
+    let gists = get_gists().await.expect("Failed to fetch private gists.");
 
     let repos = get_repositories()
         .await
@@ -88,6 +135,21 @@ async fn main() -> anyhow::Result<()> {
             .put_object(s3_path, &buf)
             .await
             .expect("Failed to upload to s3");
+    }
+
+    for gist in gists {
+        for (filename, file) in gist.files {
+            let path = format!(
+                "gists/{}/{}-{}",
+                if gist.public { "public" } else { "private" },
+                gist.id[0..5].to_string(),
+                filename
+            );
+            bucket
+                .put_object(path, file_content(&file).await?.as_bytes())
+                .await
+                .expect("Failed to upload to s3");
+        }
     }
 
     println!("Finished.");
